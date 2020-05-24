@@ -1,0 +1,427 @@
+const ROZMIAR_KOLEJKI = 1;
+const X = 2;
+
+server semaphore {
+    var state : 0..X;
+
+    {p | state > 0} -> {state = state - 1}
+    {v | state < X} -> {state = state + 1}
+    {v | state == X } -> { ok }
+}
+
+server kolejka{
+	var czekaCzyt : 0..X;
+	var czekaPis : 0..X;
+	var czytelnicy : 0..X;
+	var pisarze : 0..X;
+
+--	var max_rozmiar : 0..X;
+--	var glowa : 0..X;
+	var licznik : 0..ROZMIAR_KOLEJKI;
+--	var wiadomosci : 0..X[ROZMIAR_KOLEJKI];
+
+	{dodaj | licznik < ROZMIAR_KOLEJKI} -> {licznik = licznik + 1}
+	{wyjmij | licznik > 0} -> {licznik = licznik - 1}
+	{czytaj} -> {ok}
+
+	{czekaCzytDodaj | czekaCzyt < X} -> {czekaCzyt = czekaCzyt + 1}
+	{czekaCzytDodaj | czekaCzyt == X} -> {ok}
+	{czekaCzytOdejmij | czekaCzyt > 0} -> {czekaCzyt = czekaCzyt - 1}
+
+	{czekaPisDodaj | czekaPis < X} -> {czekaPis = czekaPis + 1}
+	{czekaPisDodaj | czekaPis == X} -> {ok}
+	{czekaPisOdejmij | czekaPis > 0} -> {czekaPis = czekaPis - 1}
+
+	{czytelnicyDodaj | czytelnicy < X}  -> {czytelnicy = czytelnicy + 1}
+	{czytelnicyDodaj | czytelnicy == X}  -> {ok}
+	{czytelnicyOdejmij | czytelnicy > 0} -> {czytelnicy = czytelnicy - 1}
+
+	{pisarzeDodaj | pisarze < X} -> {pisarze = pisarze + 1}
+	{pisarzeDodaj | pisarze ==X} -> {ok}
+	{pisarzeOdejmij | pisarze > 0} -> {pisarze = pisarze - 1}
+
+	{czyJestKtokolwiek | pisarze > 0 || czytelnicy > 0} -> {true}
+	{czyJestKtokolwiek | pisarze == 0 && czytelnicy == 0} -> {false}
+
+	{czyBrakPisarzy_i_CzekajaCzyt | pisarze == 0 && czekaCzyt > 0} -> {true}
+	{czyBrakPisarzy_i_CzekajaCzyt | pisarze > 0 || czekaCzyt == 0} -> {false}
+
+	{czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis | pisarze == 0 && czytelnicy == 0 && czekaPis > 0} -> {true}
+	{czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis | pisarze != 0 || czytelnicy != 0 || czekaPis == 0} -> {false}
+
+	{czyPisarzeWiecejOdZera | pisarze > 0} -> {true}
+	{czyPisarzeWiecejOdZera | pisarze <= 0} -> {false}
+}
+
+
+var czyt_1 = semaphore() {state = 0};
+var pis_1 = semaphore() {state = 0};
+var zajete_1 = semaphore() {state = 0};
+var wolne_1 = semaphore() {state = ROZMIAR_KOLEJKI};
+var mutex_1 = semaphore() {state = 1};
+
+var czyt_2 = semaphore() {state = 0};
+var pis_2 = semaphore() {state = 0};
+var zajete_2 = semaphore() {state = 0};
+var wolne_2 = semaphore() {state = ROZMIAR_KOLEJKI};
+var mutex_2 = semaphore() {state = 1};
+
+
+
+var kolejka_1 = kolejka() {czekaCzyt = 0, czekaPis = 0, czytelnicy = 0, pisarze = 0, licznik = 0};
+var kolejka_2 = kolejka() {czekaCzyt = 0, czekaPis = 0, czytelnicy = 0, pisarze = 0, licznik = 0};
+
+
+
+
+process prod_1() {
+ 	loop {
+		wolne_1.p();
+		
+		mutex_1.p();
+		match kolejka_1.czyJestKtokolwiek(){
+			true => {
+				kolejka_1.czekaPisDodaj();
+				mutex_1.v();
+				pis_1.p();
+			}
+			false => skip;
+		}
+		kolejka_1.pisarzeDodaj();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_1.dodaj();
+
+	mutex_1.p();
+	kolejka_1.pisarzeOdejmij();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+		zajete_1.v();
+
+	}
+}
+
+process prod_2() {
+ 	loop {
+		wolne_2.p();
+		
+		mutex_2.p();
+		match kolejka_2.czyJestKtokolwiek(){
+			true => {
+				kolejka_2.czekaPisDodaj();
+				mutex_2.v();
+				pis_2.p();
+			}
+			false => skip;
+		}
+		kolejka_2.pisarzeDodaj();
+--BudzProces
+		match kolejka_2.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_2.czekaCzytOdejmij();
+				czyt_2.v();
+			}
+			false => {
+				match kolejka_2.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_2.czekaPisOdejmij();
+						pis_2.v();
+					}
+					false => mutex_2.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_2.dodaj();
+
+	mutex_2.p();
+	kolejka_2.pisarzeOdejmij();
+--BudzProces
+		match kolejka_2.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_2.czekaCzytOdejmij();
+				czyt_2.v();
+			}
+			false => {
+				match kolejka_2.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_2.czekaPisOdejmij();
+						pis_2.v();
+					}
+					false => mutex_2.v();
+				}
+			}
+		}
+--BudzProces
+
+		zajete_2.v();
+
+	}
+}
+
+
+process czytelnik_1() {
+	loop {
+		zajete_1.p();
+	
+		mutex_1.p();
+		match kolejka_1.czyPisarzeWiecejOdZera() {
+			true => {
+				kolejka_1.czekaCzytDodaj();
+				mutex_1.v();
+				czyt_1.p();
+			}
+			false => skip;
+		}
+		kolejka_1.czytelnicyDodaj();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_1.czytaj();
+
+	mutex_1.p();
+	kolejka_1.czytelnicyOdejmij();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+		zajete_1.v();
+	}
+}
+
+process czytelnik_1b() {
+	loop {
+		zajete_1.p();
+	
+		mutex_1.p();
+		match kolejka_1.czyPisarzeWiecejOdZera() {
+			true => {
+				kolejka_1.czekaCzytDodaj();
+				mutex_1.v();
+				czyt_1.p();
+			}
+			false => skip;
+		}
+		kolejka_1.czytelnicyDodaj();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_1.czytaj();
+
+	mutex_1.p();
+	kolejka_1.czytelnicyOdejmij();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+		zajete_1.v();
+	}
+}
+
+
+process kons() {
+ 	loop {
+		zajete_1.p();
+		
+		mutex_1.p();
+		match kolejka_1.czyJestKtokolwiek(){
+			true => {
+				kolejka_1.czekaPisDodaj();
+				mutex_1.v();
+				pis_1.p();
+			}
+			false => skip;
+		}
+		kolejka_1.pisarzeDodaj();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_1.wyjmij();
+
+	mutex_1.p();
+	kolejka_1.pisarzeOdejmij();
+--BudzProces
+		match kolejka_1.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_1.czekaCzytOdejmij();
+				czyt_1.v();
+			}
+			false => {
+				match kolejka_1.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_1.czekaPisOdejmij();
+						pis_1.v();
+					}
+					false => mutex_1.v();
+				}
+			}
+		}
+--BudzProces
+
+		wolne_1.v();
+
+	zajete_2.p();
+		
+		mutex_2.p();
+		match kolejka_2.czyJestKtokolwiek(){
+			true => {
+				kolejka_2.czekaPisDodaj();
+				mutex_2.v();
+				pis_2.p();
+			}
+			false => skip;
+		}
+		kolejka_2.pisarzeDodaj();
+--BudzProces
+		match kolejka_2.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_2.czekaCzytOdejmij();
+				czyt_2.v();
+			}
+			false => {
+				match kolejka_2.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_2.czekaPisOdejmij();
+						pis_2.v();
+					}
+					false => mutex_2.v();
+				}
+			}
+		}
+--BudzProces
+
+	kolejka_2.wyjmij();
+
+	mutex_2.p();
+	kolejka_2.pisarzeOdejmij();
+--BudzProces
+		match kolejka_2.czyBrakPisarzy_i_CzekajaCzyt(){
+			true => {
+				kolejka_2.czekaCzytOdejmij();
+				czyt_2.v();
+			}
+			false => {
+				match kolejka_2.czyBrakPisarzy_i_Czytelnikow_i_CzekajaPis(){
+					true => {
+						kolejka_2.czekaPisOdejmij();
+						pis_2.v();
+					}
+					false => mutex_2.v();
+				}
+			}
+		}
+--BudzProces
+
+		wolne_2.v();
+	}
+}
+
+
+
+
